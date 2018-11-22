@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Document</title>
+</head>
+<body>
+    <div id="root"></div>
+</body>
+<script >
+    class Component {
+        constructor( props = {} ) {
+            this.isReactComponent = true;
+            debugger
+            this.state = {};
+            this.props = props || {};
+        }
+
+        setState( stateChange ) {
+            Object.assign( this.state, stateChange );
+            renderComponent( this );
+        }
+    }
+
+    function createElement( tag, attrs, ...children ) {
+        debugger
+        return {
+            tag,
+            attrs,
+            children
+        }
+    }
+
+    function setAttribute( dom, name, value ) {
+        // 如果属性名是class，则改回className
+        debugger
+        if ( name === 'className' ) name = 'class';
+
+        // 如果属性名是onXXX，则是一个时间监听方法
+        if ( /on\w+/.test( name ) ) {
+            name = name.toLowerCase();
+            dom[ name ] = value || '';
+        // 如果属性名是style，则更新style对象
+        } else if ( name === 'style' ) {
+            if ( !value || typeof value === 'string' ) {
+                node.style.cssText = value || '';
+            } else if ( value && typeof value === 'object' ) {
+                for ( let name in value ) {
+                    // 可以通过style={ width: 20 }这种形式来设置样式，可以省略掉单位px
+                    dom.style[ name ] = typeof value[ name ] === 'number' ? value[ name ] + 'px' : value[ name ];
+                }
+            }
+        // 普通属性则直接更新属性
+        } else {
+            if ( name in dom ) {
+                dom[ name ] = value || '';
+            }
+            if ( value ) {
+                dom.setAttribute( name, value );
+            } else {
+                dom.removeAttribute( name, value );
+            }
+        }
+    }
+
+    var React = {createElement}
+    function createComponent( component, props ) {
+
+        debugger
+        let inst;
+
+        if ( component.prototype && component.prototype.render ) {
+                inst = new component( props );
+        } else {
+            inst = new Component( props );
+            inst.constructor = component;
+            inst.render = function() {
+                //??
+                return this.constructor( props );
+            }
+        }
+        //返回的是component的实例
+        return inst;
+    }
+
+    function unmountComponent( component ) {
+        debugger
+        if ( component.componentWillUnmount ) component.componentWillUnmount();
+        removeNode( component.base);
+    }
+
+    function setComponentProps( component, props ) {
+
+        debugger
+        if ( !component.base ) {
+                if ( component.componentWillMount ) component.componentWillMount();
+        } else if ( component.componentWillReceiveProps ) {
+                component.componentWillReceiveProps( props );
+        }
+
+        component.props = props;
+
+        renderComponent( component );
+
+    }
+
+    function renderComponent( component ) {
+
+        debugger
+        let base;
+        //renderer是虚拟DOM
+        const renderer = component.render();
+
+        if ( component.base && component.componentWillUpdate ) {
+            component.componentWillUpdate();
+        }
+        //base是实际渲染出来的DOM
+        base = _render( renderer );
+
+        if ( component.base ) {
+            if ( component.componentDidUpdate ) component.componentDidUpdate();
+        } else if ( component.componentDidMount ) {
+            component.componentDidMount();
+        }
+
+        if ( component.base && component.base.parentNode ) {
+            component.base.parentNode.replaceChild( base, component.base );
+        }
+
+        component.base = base;
+        base._component = component;
+
+    }
+
+    function _render( vnode ) {
+
+        debugger
+        if ( vnode === undefined || vnode === null || typeof vnode === 'boolean' ) vnode = '';
+
+        if ( typeof vnode === 'number' ) vnode = String( vnode );
+
+        if ( typeof vnode === 'string' ) {
+            let textNode = document.createTextNode( vnode );
+            return textNode;
+        }
+
+        if ( typeof vnode.tag === 'function' ) {
+            //component是函数的实例
+            const component = createComponent( vnode.tag, vnode.attrs );
+
+            setComponentProps( component, vnode.attrs );
+
+            return component.base;
+        }
+
+        const dom = document.createElement( vnode.tag );
+
+        if ( vnode.attrs ) {
+            Object.keys( vnode.attrs ).forEach( key => {
+
+                const value = vnode.attrs[ key ];
+
+                setAttribute( dom, key, value );
+
+            } );
+        }
+
+        if ( vnode.children ) {
+            vnode.children.forEach( child => render( child, dom ) );
+        }
+
+        return dom;
+    }
+    var ReactDOM = {render}
+    function render( vnode, container ) {
+        debugger
+        return container.appendChild( _render( vnode ) );
+    }
+
+    // ReactDOM.render(
+    //     <h1 a="b" className="classname1" onClick={()=>{console.log(1)}} style={{"backgroundColor":"yellow","color":"red"}} >Hello, world!</h1>,
+    //     document.getElementById('root')
+    // );
+
+    // ReactDOM.render(React.createElement(
+    //     'h1',
+    //     { 
+    //         a: 'b', 
+    //         className: 'classname1', 
+    //         onClick: () => {
+    //             console.log(1);
+    //         }, 
+    //         style: { "backgroundColor": "yellow", "color": "red" } 
+    //     },
+    //     'Hello, world!'
+    // ), document.getElementById('root'));
+
+    //{/* <h1 a="b" class="classname1" style="background-color: yellow; color: red;">Hello, world!</h1> */}
+
+
+
+    // class Welcome extends Component {
+    //     render() {
+    //         debugger
+    //         return React.createElement(
+    //             'h1',
+    //             null,
+    //             'Hello, ',
+    //             this.props.name
+    //         );
+    //     }
+    // }
+    function Welcome() {
+        return React.createElement(
+            "h1",
+            null,
+            "666, ",
+            this.props.name
+        );
+    }
+    ReactDOM.render(React.createElement(Welcome, { name: 'Sara', a: "12" }), document.getElementById('root'));
+
+
+    // function App() {
+    //     return React.createElement(
+    //         "div",
+    //         null,
+    //         React.createElement(Welcome, { name: "Sara" }),
+    //         React.createElement(Welcome, { name: "Cahal" }),
+    //         React.createElement(Welcome, { name: "Edite" })
+    //     );
+    // }
+    // ReactDOM.render(React.createElement(App, null), document.getElementById('root'));
+
+
+
+    // class Counter extends Component {
+    //     constructor(props) {
+    //         super(props);
+    //         debugger
+    //         this.state = {
+    //             num: 1
+    //         };
+    //     }
+
+    //     onClick() {
+    //         this.setState({ num: this.state.num + 1 });
+    //     }
+
+    //     render() {
+    //         return React.createElement(
+    //             'div',
+    //             null,
+    //             React.createElement(
+    //                 'h1',
+    //                 null,
+    //                 'count: ',
+    //                 this.state.num
+    //             ),
+    //             React.createElement(
+    //                 'button',
+    //                 { onClick: () => this.onClick() },
+    //                 'add'
+    //             )
+    //         );
+    //     }
+    // }
+    // render(React.createElement(Counter, null), document.getElementById('root'));
+</script>
+</html>
