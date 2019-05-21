@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Document</title>
+</head>
+<body>
+    <div id="root"></div>
+</body>
+<script >
+    class Component {
+        constructor( props = {} ) {
+            this.isReactComponent = true;
+            this.state = {};
+            this.props = props || {};
+        }
+
+        setState( stateChange ) {
+            // Object.assign( this.state, stateChange );
+            // renderComponent( this );
+            enqueueSetState( stateChange, this )
+        }
+    }
+
+    const setStateQueue = [];
+    const renderQueue = [];
+
+    function enqueueSetState( stateChange, component ) {
+
+        if ( setStateQueue.length === 0 ) {
+            Promise.resolve().then( flush );
+        }
+        setStateQueue.push( {
+            stateChange,
+            component
+        } );
+
+        if ( !renderQueue.some( item => item === component ) ) {
+            renderQueue.push( component );
+        }
+    }
+
+    function flush() {
+        let item, component;
+
+        /* eslint-disable-next-line no-cond-assign */
+        while ( item = setStateQueue.shift() ) {
+
+            const { stateChange, component } = item;
+
+            // 如果没有prevState，则将当前的state作为初始的prevState
+            if ( !component.prevState ) {
+                component.prevState = Object.assign( {}, component.state );
+            }
+
+            // 如果stateChange是一个方法，也就是setState的第二种形式
+            if ( typeof stateChange === 'function' ) {
+                Object.assign( component.state, stateChange( component.prevState, component.props ) );
+            } else {
+                // 如果stateChange是一个对象，则直接合并到setState中
+                Object.assign( component.state, stateChange );
+            }
+
+            component.prevState = component.state;
+
+        }
+
+        /* eslint-disable-next-line no-cond-assign */
+        while ( component = renderQueue.shift() ) {
+            renderComponent( component );
+        }
+
+    }
+
+    function diff( dom, vnode, container ) {
+
+        const ret = diffNode( dom, vnode );
+
+        if ( container && ret.parentNode !== container ) {
+            container.appendChild( ret );
+        }
+
+        return ret;
+
+    }
+
+    function diffNode( dom, vnode ) {
+
+        let out = dom;
+
+        if ( vnode === undefined || vnode === null || typeof vnode === 'boolean' ) vnode = '';
+
+        if ( typeof vnode === 'number' ) vnode = String( vnode );
+
+        // diff text node
+        if ( typeof vnode === 'string' ) {
+
+            // 如果当前的DOM就是文本节点，则直接更新内容
+            if ( dom && dom.nodeType === 3 ) {    // nodeType: https://developer.mozilla.org/zh-CN/docs/Web/API/Node/nodeType
+                if ( dom.textContent !== vnode ) {
+                    dom.textContent = vnode;
+                }
+            // 如果DOM不是文本节点，则新建一个文本节点DOM，并移除掉原来的
+            } else {
+                out = document.createTextNode( vnode );
+                if ( dom && dom.parentNode ) {
+                    dom.parentNode.replaceChild( out, dom );
+                }
+            }
+
+            return out;
+        }
+
+        if ( typeof vnode.tag === 'function' ) {
+            return diffComponent( dom, vnode );
+        }
+
+        //
+        if ( !dom || !isSameNodeType( dom, vnode ) ) {
+            out = document.createElement( vnode.tag );
+
+            if ( dom ) {
+                [ ...dom.childNodes ].map( out.appendChild );    // 将原来的子节点移到新节点下
+
+                if ( dom.parentNode ) {
+                    dom.parentNode.replaceChild( out, dom );    // 移除掉原来的DOM对象
+                }
+            }
+        }
+
+        if ( vnode.children && vnode.children.length > 0 || ( out.childNodes && out.childNodes.length > 0 ) ) {
+            diffChildren( out, vnode.children );
+        }
+
+        diffAttributes( out, vnode );
+
+        return out;
+
+    }
+
+    function diffChildren( dom, vchildren ) {
+
+        const domChildren = dom.childNodes;
+        const children = [];
+
+        const keyed = {};
+
+        if ( domChildren.length > 0 ) {
+            for ( let i = 0; i < domChildren.length; i++ ) {
+                const child = domChildren[ i ];
+                const key = child.key;
+                if ( key ) {
+                    keyed[ key ] = child;
+                } else {
+                    children.push( child );
+                }
+            }
+        }
+
+        if ( vchildren && vchildren.length > 0 ) {
+
+            let min = 0;
+            let childrenLen = children.length;
+
+            for ( let i = 0; i < vchildren.length; i++ ) {
+
+                const vchild = vchildren[ i ];
+                const key = vchild.key;
+                let child;
+
+                if ( key ) {
+
+                    if ( keyed[ key ] ) {
+                        child = keyed[ key ];
+                        keyed[ key ] = undefined;
+                    }
+
+                } else if ( min < childrenLen ) {
+
+                    for ( let j = min; j < childrenLen; j++ ) {
+
+                        const c = children[ j ];
+
+                        if ( c && isSameNodeType( c, vchild ) ) {
+
+                            child = c;
+                            children[ j ] = undefined;
+
+                            if ( j === childrenLen - 1 ) childrenLen--;
+                            if ( j === min ) min++;
+                            break;
+
+                        }
+
+                    }
+
+                }
+
+                child = diffNode( child, vchild );
+
+                const f = domChildren[ i ];
+                if ( child && child !== dom && child !== f ) {
+                    if ( !f ) {
+                        dom.appendChild( child );
+                    } else if ( child === f.nextSibling ) {
+                        removeNode( f );
+                    } else {
+                        dom.insertBefore( child, f );
+                    }
+                }
+
+            }
+        }
+
+    }
+
+    function diffComponent( dom, vnode ) {
+
+        let c = dom && dom._component;
+        let oldDom = dom;
+
+        // 如果组件类型没有变化，则重新set props
+        if ( c && c.constructor === vnode.tag ) {
+            setComponentProps( c, vnode.attrs );
+            dom = c.base;
+        // 如果组件类型变化，则移除掉原来组件，并渲染新的组件
+        } else {
+
+            if ( c ) {
+                unmountComponent( c );
+                oldDom = null;
+            }
+
+            c = createComponent( vnode.tag, vnode.attrs );
+
+            setComponentProps( c, vnode.attrs );
+            dom = c.base;
+
+            if ( oldDom && dom !== oldDom ) {
+                oldDom._component = null;
+                removeNode( oldDom );
+            }
+
+        }
+
+        return dom;
+
+    }
+
+    function createComponent( component, props ) {
+
+        let inst;
+
+        if ( component.prototype && component.prototype.render ) {
+                inst = new component( props );
+        } else {
+            inst = new Component( props );
+            inst.constructor = component;
+            inst.render = function() {
+                return this.constructor( props );
+            }
+        }
+        //返回的是component的实例
+        return inst;
+    }
+
+    function setComponentProps( component, props ) {
+
+        if ( !component.base ) {
+            if ( component.componentWillMount ) component.componentWillMount();
+        } else if ( component.componentWillReceiveProps ) {
+            component.componentWillReceiveProps( props );
+        }
+
+        component.props = props;
+
+        renderComponent( component );
+
+    }
+
+    function renderComponent( component ) {
+
+        let base;
+
+        // renderer为vnode
+        const renderer = component.render();
+
+        if ( component.base && component.componentWillUpdate ) {
+            component.componentWillUpdate();
+        }
+
+        base = diffNode( component.base, renderer );
+
+        if ( component.base ) {
+            if ( component.componentDidUpdate ) component.componentDidUpdate();
+        } else if ( component.componentDidMount ) {
+            component.componentDidMount();
+        }
+
+        component.base = base;
+        base._component = component;
+
+    }
+
+    function unmountComponent( component ) {
+        if ( component.componentWillUnmount ) component.componentWillUnmount();
+        removeNode( component.base );
+    }
+
+    function isSameNodeType( dom, vnode ) {
+        if ( typeof vnode === 'string' || typeof vnode === 'number' ) {
+            return dom.nodeType === 3;
+        }
+
+        if ( typeof vnode.tag === 'string' ) {
+            return dom.nodeName.toLowerCase() === vnode.tag.toLowerCase();
+        }
+
+        return dom && dom._component && dom._component.constructor === vnode.tag;
+    }
+
+    function diffAttributes( dom, vnode ) {
+
+        const old = {};    // 当前DOM的属性
+        const attrs = vnode.attrs;     // 虚拟DOM的属性
+
+        for ( let i = 0; i < dom.attributes.length; i++ ) {
+            const attr = dom.attributes[ i ];
+            old[ attr.name ] = attr.value;
+        }
+
+        // 如果原来的属性不在新的属性当中，则将其移除掉（属性值设为undefined）
+        for ( const name in old ) {
+
+            if ( !( name in attrs ) ) {
+                setAttribute( dom, name, undefined );
+            }
+
+        }
+
+        // 更新新的属性值
+        for ( const name in attrs ) {
+
+            if ( old[ name ] !== attrs[ name ] ) {
+                setAttribute( dom, name, attrs[ name ] );
+            }
+
+        }
+
+    }
+
+    function removeNode( dom ) {
+
+        if ( dom && dom.parentNode ) {
+            dom.parentNode.removeChild( dom );
+        }
+
+    }
+    
+    function createElement( tag, attrs, ...children ) {
+        attrs = attrs || {}
+        return {
+            tag,
+            attrs,
+            children,
+            key: attrs.key || null,
+        }
+    }
+
+    function setAttribute( dom, name, value ) {
+        // 如果属性名是class，则改回className
+        if ( name === 'className' ) name = 'class';
+
+        // 如果属性名是onXXX，则是一个时间监听方法
+        if ( /on\w+/.test( name ) ) {
+            name = name.toLowerCase();
+            dom[ name ] = value || '';
+        // 如果属性名是style，则更新style对象
+        } else if ( name === 'style' ) {
+            if ( !value || typeof value === 'string' ) {
+                node.style.cssText = value || '';
+            } else if ( value && typeof value === 'object' ) {
+                for ( let name in value ) {
+                    // 可以通过style={ width: 20 }这种形式来设置样式，可以省略掉单位px
+                    dom.style[ name ] = typeof value[ name ] === 'number' ? value[ name ] + 'px' : value[ name ];
+                }
+            }
+        // 普通属性则直接更新属性
+        } else {
+            if ( name in dom ) {
+                dom[ name ] = value || '';
+            }
+            if ( value ) {
+                dom.setAttribute( name, value );
+            } else {
+                dom.removeAttribute( name, value );
+            }
+        }
+    }
+
+    var React = {createElement, Component}
+
+
+    var ReactDOM = {render}
+    function render( vnode, container, dom ) {
+        return diff( dom, vnode, container );
+    }
+
+    // ReactDOM.render(
+    //     <h1 a="b" className="classname1" onClick={()=>{console.log(1)}} style={{"backgroundColor":"yellow","color":"red"}} >Hello, world!</h1>,
+    //     document.getElementById('root')
+    // );
+
+    // ReactDOM.render(React.createElement(
+    //     'h1',
+    //     { 
+    //         a: 'b', 
+    //         className: 'classname1', 
+    //         onClick: () => {
+    //             console.log(1);
+    //         }, 
+    //         style: { "backgroundColor": "yellow", "color": "red" } 
+    //     },
+    //     'Hello, world!'
+    // ), document.getElementById('root'));
+
+
+
+
+    // class Welcome extends Component {
+    //     render() {
+    //         return React.createElement(
+    //             'h1',
+    //             null,
+    //             'Hello, ',
+    //             this.props.name
+    //         );
+    //     }
+    // }
+
+    // function Welcome() {
+    //     return React.createElement(
+    //         "h1",
+    //         null,
+    //         "666, ",
+    //         this.props.name
+    //     );
+    // }
+
+    // ReactDOM.render(React.createElement(Welcome, { name: 'Sara', a: "12" }), document.getElementById('root'));
+
+
+    // function App() {
+    //     return React.createElement(
+    //         "div",
+    //         {divA: 1},
+    //         React.createElement(Welcome, { name: "Sara" }),
+    //         React.createElement(Welcome, { name: "Cahal" }),
+    //         React.createElement(Welcome, { name: "Edite" })
+    //     );
+    // }
+    // ReactDOM.render(React.createElement(App, {appProps: "appProps11"}), document.getElementById('root'));
+
+
+
+    // class Counter extends Component {
+    //     constructor(props) {
+    //         super(props);
+    //         this.state = {
+    //             num: 1
+    //         };
+    //     }
+    //     onClick() {
+    //         this.setState({ num: this.state.num + 1 });
+    //     }
+    //     render() {
+    //         return React.createElement(
+    //             'div',
+    //             null,
+    //             React.createElement(
+    //                 'h1',
+    //                 null,
+    //                 'count: ',
+    //                 this.state.num
+    //             ),
+    //             React.createElement(
+    //                 'button',
+    //                 { onClick: () => this.onClick() },
+    //                 'add'
+    //             )
+    //         );
+    //     }
+    // }
+    // render(React.createElement(Counter, { name: 'Sara', a: "12" }), document.getElementById('root'));
+
+    class App extends React.Component {
+        constructor() {
+            super();
+            this.state = {
+                num: 0
+            };
+        }
+
+        componentDidMount() {
+            for (let i = 0; i < 10; i++) {
+                this.setState( { num: this.state.num + 1 } )
+                console.log( this.state.num ); 
+
+                // this.setState(prevState => {
+                //     console.log(prevState.num, this.state.num);
+                //     return {
+                //         num: prevState.num + 1
+                //     };
+                // });
+                // console.log( this.state.num ); 
+
+            }
+        }
+
+        componentDidUpdate() {
+            console.log('update');
+        }
+
+        render() {
+            return React.createElement("div", {
+                className: "App11"
+            }, React.createElement("h1", null, this.state.num));
+        }
+
+    }
+
+    ReactDOM.render(React.createElement(App, null), document.getElementById('root'));
+
+
+</script>
+</html>
